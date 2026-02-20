@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crimson - Architecture &amp; Attack Surface Graph</title>
+    <link rel="stylesheet" href="/static/crimson.css">
+    <script src="https://unpkg.com/neovis.js@2.0.2"></script>
+</head>
+<body>
+    <!-- Controls Panel -->
+    <div id="controls">
+        <h2>Crimson</h2>
+        <p class="subtitle">Architecture &amp; Attack Surface</p>
+
+        <div class="filter-group">
+            <h3>Filters</h3>
+            <button class="filter-btn active" data-filter="all" onclick="applyFilter('all')">All Components</button>
+            <button class="filter-btn" data-filter="vulns" onclick="applyFilter('vulns')">Vulnerabilities Only</button>
+            <button class="filter-btn" data-filter="attack-surface" onclick="applyFilter('attack-surface')">Attack Surface</button>
+            <button class="filter-btn" data-filter="data-flows" onclick="applyFilter('data-flows')">Data Flows</button>
+        </div>
+
+        <div class="legend">
+            <h3>Risk Legend</h3>
+            <div class="gradient-bar"></div>
+            <div class="gradient-labels">
+                <span>0 Safe</span>
+                <span>5 Medium</span>
+                <span>10 Critical</span>
+            </div>
+        </div>
+
+        <div class="node-types">
+            <h3>Node Types</h3>
+            <div class="type-item"><span class="type-dot" style="background:#4A90D9"></span> Component</div>
+            <div class="type-item"><span class="type-dot" style="background:#6C5CE7"></span> Tool</div>
+            <div class="type-item"><span class="type-dot" style="background:#00B894"></span> DataStore</div>
+            <div class="type-item"><span class="type-dot" style="background:#FD79A8"></span> Endpoint</div>
+            <div class="type-item"><span class="type-dot" style="background:#FF4444"></span> Vulnerability</div>
+        </div>
+    </div>
+
+    <!-- Side Panel for vulnerability details -->
+    <div id="side-panel" class="side-panel hidden">
+        <button class="close-btn" onclick="closeSidePanel()">&times;</button>
+        <div id="panel-content"></div>
+    </div>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <!-- Graph container -->
+    <div id="viz"></div>
+
+    <script>
+        // Neo4j credentials injected by the server
+        var NEO4J_URI      = "{{ neo4j_uri }}";
+        var NEO4J_USER     = "{{ neo4j_user }}";
+        var NEO4J_PASSWORD = "{{ neo4j_password }}";
+    </script>
+    <script src="/static/crimson.js"></script>
+</body>
+</html>

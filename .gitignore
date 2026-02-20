@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+crimson_runs/
+.pytest_cache/
+*.egg-info/
