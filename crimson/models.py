@@ -88,7 +88,7 @@ class AttackSpec(BaseModel):
     category: AttackCategory
     strategy: str
     target_component_id: Optional[str] = None
-    max_turns: int = 8
+    max_turns: int = 8  # overridden by planner prompt; hard-capped by send_message
     priority: int = 1
 
 

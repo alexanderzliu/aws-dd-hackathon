@@ -93,9 +93,21 @@
                     <strong>report</strong> &mdash; to systematically probe target agents for prompt
                     injection, data exfiltration, tool misuse, and policy bypass weaknesses.
                 </p>
-                <button class="btn-primary hero-cta" onclick="document.getElementById('start-scan-btn').click()">
-                    <span class="btn-icon">&gt;_</span> INITIATE SCAN
-                </button>
+                <div class="scan-mode-toggle">
+                    <button class="scan-mode-btn active" data-mode="quick">
+                        <span class="mode-label">QUICK SCAN</span>
+                        <span class="mode-detail">3 attacks / 3 turns</span>
+                    </button>
+                    <button class="scan-mode-btn" data-mode="deep">
+                        <span class="mode-label">DEEP SCAN</span>
+                        <span class="mode-detail">10 attacks / 8 turns</span>
+                    </button>
+                </div>
+                <div class="hero-cta-wrapper">
+                    <button class="btn-primary hero-cta" onclick="document.getElementById('start-scan-btn').click()">
+                        <span class="btn-icon">&gt;_</span> INITIATE SCAN
+                    </button>
+                </div>
             </section>
 
             <section class="attack-categories">

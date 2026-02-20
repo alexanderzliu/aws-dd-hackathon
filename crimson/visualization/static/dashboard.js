@@ -3,6 +3,7 @@
    ========================================================================== */
 "use strict";
 
+let currentScanMode = 'quick';
 let currentScanId = null;
 let eventSource = null;
 let attacks = {};
@@ -42,6 +43,13 @@ function initDashboard() {
             if (stage) { showPanel(stage + '-panel'); setActiveNav(stage); }
         });
     });
+    document.querySelectorAll('.scan-mode-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.scan-mode-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            currentScanMode = btn.dataset.mode;
+        });
+    });
     loadScanList();
 }
 
@@ -66,7 +74,11 @@ function startScan() {
     btn.disabled = true;
     btn.textContent = 'RUNNING...';
     resetUI();
-    fetch('/api/scan/start', { method: 'POST' }).then(function(r) {
+    fetch('/api/scan/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: currentScanMode })
+    }).then(function(r) {
         if (r.status === 409) { showToast('Scan already running'); enableStartButton(); return null; }
         if (!r.ok) throw new Error('Failed to start scan');
         return r.json();
@@ -76,6 +88,7 @@ function startScan() {
         connectSSE(data.scan_id);
         showPanel('recon-panel');
         setActiveNav('recon');
+        showThinking('recon-log', 'Analyzing target source code...');
     }).catch(function(e) {
         console.error(e);
         showToast('Error: ' + e.message);
@@ -106,6 +119,7 @@ function handleEvent(event) {
         case 'architecture_mapped': flushArchRenderQueue(function() { renderArchitecture(data); }); break;
         case 'attack_surface_analyzed': renderPlanActivity('Attack surface analyzed', data); break;
         case 'data_flows_mapped': renderPlanActivity('Data flows mapped', data); break;
+        case 'plan_item': renderPlanItem(data); break;
         case 'plan_ready': renderPlanReady(data); break;
         case 'attack_started': renderAttackStarted(data); break;
         case 'turn': renderTurn(data); break;
@@ -143,6 +157,26 @@ function updatePipelineStage(activeStage) {
     });
 }
 
+function showThinking(logId, message) {
+    var log = document.getElementById(logId);
+    if (!log) return;
+    /* Remove existing thinking indicator */
+    var existing = log.querySelector('.terminal-thinking');
+    if (existing) existing.remove();
+    clearPlaceholder(log);
+    var el = document.createElement('div');
+    el.className = 'terminal-thinking';
+    el.innerHTML = '<span class="thinking-dots"><span></span><span></span><span></span></span> ' + escapeHtml(message);
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+}
+function removeThinking(logId) {
+    var log = document.getElementById(logId);
+    if (!log) return;
+    var el = log.querySelector('.terminal-thinking');
+    if (el) el.remove();
+}
+
 function showPanel(panelId) {
     document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
     var t = document.getElementById(panelId);
@@ -155,6 +189,7 @@ function setActiveNav(stage) {
 /* ---- Renderers: Recon ---- */
 function renderSourceRead(data) {
     var log = document.getElementById('recon-log');
+    removeThinking('recon-log');
     clearPlaceholder(log);
     appendLog(log, 'Source introspected: testee=' + (data.testee_id||'') + ', tools=' + (data.tool_count||0), 'text-cyan');
 }
@@ -163,6 +198,7 @@ function renderArchitecture(data) {
     var comps = data.components || [], rels = data.relationships || [];
     appendLog(log, 'Architecture mapped: ' + comps.length + ' components, ' + rels.length + ' relationships');
     drawArchGraph(document.getElementById('arch-graph'), comps, rels);
+    showThinking('recon-log', 'Handing off to plan phase...');
 }
 
 function drawArchGraph(container, components, relationships) {
@@ -198,10 +234,34 @@ function drawArchGraph(container, components, relationships) {
         t.setAttribute('x', n.x); t.setAttribute('y', n.y+30);
         t.setAttribute('text-anchor', 'middle'); t.setAttribute('fill', '#e0e0e0');
         t.setAttribute('font-size', '10'); t.setAttribute('font-family', "'Fira Code', monospace");
-        t.textContent = n.name.length > 15 ? n.name.slice(0,12)+'...' : n.name;
+        t.textContent = n.name;
         svg.appendChild(t);
     });
+    drawArchLegend(svg);
     container.appendChild(svg);
+}
+
+function drawArchLegend(svg) {
+    var typeColors = { agent:'#4A90D9', tool:'#6C5CE7', datastore:'#00B894', external:'#FD79A8' };
+    var labels = ['agent', 'tool', 'datastore', 'external'];
+    var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'arch-legend');
+    labels.forEach(function(label, i) {
+        var y = 14 + i * 18;
+        var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', '16'); circle.setAttribute('cy', y);
+        circle.setAttribute('r', '5'); circle.setAttribute('fill', typeColors[label]);
+        circle.setAttribute('fill-opacity', '0.4'); circle.setAttribute('stroke', typeColors[label]);
+        circle.setAttribute('stroke-width', '1.5');
+        g.appendChild(circle);
+        var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t.setAttribute('x', '28'); t.setAttribute('y', y + 4);
+        t.setAttribute('fill', '#999'); t.setAttribute('font-size', '9');
+        t.setAttribute('font-family', "'Fira Code', monospace");
+        t.textContent = label;
+        g.appendChild(t);
+    });
+    svg.appendChild(g);
 }
 
 /* ---- Renderers: Incremental Recon (staggered queue) ---- */
@@ -233,6 +293,7 @@ function ensureArchSvg() {
         var w = container.clientWidth || 600, h = 350;
         svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('width', w); svg.setAttribute('height', h);
+        drawArchLegend(svg);
         container.appendChild(svg);
     }
     return svg;
@@ -335,6 +396,7 @@ function renderRelationshipDiscovered(data) {
 /* ---- Renderers: Plan ---- */
 function renderPlanActivity(label, data) {
     var log = document.getElementById('plan-log');
+    removeThinking('plan-log');
     clearPlaceholder(log);
     var results = data.results || [];
     appendLog(log, label + ': ' + results.length + ' items found', 'text-cyan');
@@ -343,23 +405,44 @@ function renderPlanActivity(label, data) {
     });
 }
 
+function renderPlanItem(data) {
+    var a = data.attack || {};
+    var idx = data.index || 0;
+    var tbody = document.querySelector('#attack-plan-table tbody');
+    /* Skip if a row with this name already exists */
+    var existing = tbody.querySelector('tr[data-plan-name="' + (a.attack_name || '').replace(/"/g, '\\"') + '"]');
+    if (existing) return;
+    var tr = document.createElement('tr');
+    tr.setAttribute('data-plan-name', a.attack_name || '');
+    tr.className = 'plan-row-enter';
+    tr.innerHTML = '<td>' + idx + '</td><td>' + escapeHtml(a.attack_name) + '</td><td><span class="badge badge-category">' + escapeHtml(a.category) + '</span></td><td>' + escapeHtml(a.strategy || '').slice(0,100) + '</td><td><span class="badge badge-pending">PENDING</span></td>';
+    tbody.appendChild(tr);
+    document.getElementById('plan-count').textContent = tbody.children.length + ' attacks planned';
+    var log = document.getElementById('plan-log');
+    removeThinking('plan-log');
+    clearPlaceholder(log);
+    appendLog(log, 'Attack planned: ' + a.attack_name + ' [' + a.category + ']', 'text-cyan');
+}
+
 function renderPlanReady(data) {
     var planAttacks = data.attacks || [];
     var tbody = document.querySelector('#attack-plan-table tbody');
-    tbody.innerHTML = '';
+    /* Only add attacks not already present from plan_item events */
     planAttacks.forEach(function(a, i) {
+        var existing = tbody.querySelector('tr[data-plan-name="' + (a.attack_name || '').replace(/"/g, '\\"') + '"]');
+        if (existing) return;
         var tr = document.createElement('tr');
         tr.setAttribute('data-plan-name', a.attack_name || '');
         tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + escapeHtml(a.attack_name) + '</td><td><span class="badge badge-category">' + escapeHtml(a.category) + '</span></td><td>' + escapeHtml(a.strategy || '').slice(0,100) + '</td><td><span class="badge badge-pending">PENDING</span></td>';
         tbody.appendChild(tr);
     });
-    document.getElementById('plan-count').textContent = planAttacks.length + ' attacks planned';
-    var log = document.getElementById('plan-log');
-    clearPlaceholder(log);
-    appendLog(log, 'Attack plan registered: ' + planAttacks.length + ' attacks queued', 'text-cyan');
+    document.getElementById('plan-count').textContent = tbody.children.length + ' attacks planned';
+    showThinking('plan-log', 'Handing off to attack phase...');
 }
 
 function renderAttackStarted(data) {
+    removeThinking('plan-log');
+    removeThinking('recon-log');
     attackIndex++;
     attacks[data.attack_id] = { index: attackIndex, name: data.attack_name, category: data.category, strategy: data.strategy, turns: [], result: null };
 
@@ -391,6 +474,7 @@ function renderAttackStarted(data) {
     }
 
     var chat = document.getElementById('attack-chat');
+    removeThinking('attack-chat');
     clearPlaceholder(chat);
     var header = document.createElement('div');
     header.className = 'chat-attack-header';
@@ -441,11 +525,14 @@ function renderAttackConcluded(data) {
     var sevBadge = data.severity ? '<span class="badge badge-' + data.severity + '">' + data.severity.toUpperCase() + '</span> ' : '';
     entry.innerHTML = '<div class="scoreboard-entry-header"><span class="scoreboard-entry-name">' + escapeHtml(data.attack_name) + '</span><span class="badge ' + (data.success ? 'badge-breached' : 'badge-defended') + '">' + (data.success ? 'BREACHED' : 'DEFENDED') + '</span></div><div class="scoreboard-entry-summary">' + sevBadge + escapeHtml(data.summary||'') + '</div>';
     entries.appendChild(entry);
+    /* Show thinking indicator while waiting for next attack */
+    showThinking('attack-chat', 'Preparing next attack...');
 }
 
 /* ---- Renderers: Report ---- */
 function renderReport(data) {
     var el = document.getElementById('report-content');
+    removeThinking('report-content');
     if (typeof marked !== 'undefined') el.innerHTML = marked.parse(data.report_markdown || '');
     else el.textContent = data.report_markdown || '';
 }

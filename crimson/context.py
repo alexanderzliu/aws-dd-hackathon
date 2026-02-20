@@ -74,6 +74,12 @@ def init(testee_module: str, scan_id: str | None = None) -> None:
     from crimson.adapters.strands_adapter import StrandsTesteeAdapter
     _adapter = StrandsTesteeAdapter(module_path=testee_module)
 
+    # Reset attack tools module-level state for fresh scan
+    from crimson.tools import attack_tools
+    attack_tools._active_attacks.clear()
+    attack_tools._completed_attacks = 0
+    attack_tools._plan_registered = False
+
     _initialized = True
     logger.info("Crimson initialized — scan_id=%s testee=%s", scan_id, testee_module)
 

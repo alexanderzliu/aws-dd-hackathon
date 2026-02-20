@@ -46,11 +46,24 @@ def register_attack_plan(attacks_json: str) -> str:
             "priority": a.get("priority", 1),
         })
 
+    # Hard-cap the plan to MAX_ATTACKS
+    if len(plan_items) > config.MAX_ATTACKS:
+        logger.warning(
+            "Plan has %d attacks but MAX_ATTACKS=%d — truncating",
+            len(plan_items), config.MAX_ATTACKS,
+        )
+        plan_items = plan_items[:config.MAX_ATTACKS]
+
     context.emit_event("plan_ready", "plan", {"attacks": plan_items})
     _plan_registered = True
 
     logger.info("Attack plan registered: %d attacks", len(plan_items))
-    return json.dumps({"registered": True, "attack_count": len(plan_items)})
+    return json.dumps({
+        "registered": True,
+        "attack_count": len(plan_items),
+        "max_attacks": config.MAX_ATTACKS,
+        "note": f"Plan capped at {config.MAX_ATTACKS} attacks." if len(attacks) > config.MAX_ATTACKS else None,
+    })
 
 
 @tool
@@ -125,7 +138,12 @@ def start_attack(attack_name: str, strategy: str, category: str) -> str:
     print(f"  Attack ID: {attack_id}")
     print(f"{'=' * 78}")
 
-    return json.dumps({"attack_id": attack_id, "status": "ready"})
+    remaining = config.MAX_ATTACKS - (len(_active_attacks) + _completed_attacks)
+    return json.dumps({
+        "attack_id": attack_id,
+        "status": "ready",
+        "attacks_remaining": remaining,
+    })
 
 
 @tool
@@ -304,15 +322,31 @@ def conclude_attack(
     del _active_attacks[conversation_id]
     _completed_attacks += 1
 
-    return json.dumps({"recorded": True, "success": success, "severity": severity})
+    # Hard cap: if we've hit MAX_ATTACKS, auto-finish so the LLM can't start more
+    if _completed_attacks >= config.MAX_ATTACKS:
+        logger.info("Max attacks (%d) reached — auto-finishing", config.MAX_ATTACKS)
+        finish_summary = _build_finish_summary()
+        return json.dumps({
+            "recorded": True,
+            "success": success,
+            "severity": severity,
+            "AUTO_FINISHED": True,
+            "message": f"All {config.MAX_ATTACKS} attacks completed. Attacks are DONE. Call finish_all_attacks now.",
+            **finish_summary,
+        })
+
+    remaining = config.MAX_ATTACKS - _completed_attacks
+    return json.dumps({
+        "recorded": True,
+        "success": success,
+        "severity": severity,
+        "attacks_completed": _completed_attacks,
+        "attacks_remaining": remaining,
+    })
 
 
-@tool
-def finish_all_attacks() -> str:
-    """Signal that all attacks are complete. Returns a summary of all attack outcomes
-    from the artifact store. Call this after concluding all attacks, before the
-    reporter takes over.
-    """
+def _build_finish_summary() -> dict:
+    """Build the attack summary dict. Used by both conclude_attack (auto-finish) and finish_all_attacks."""
     artifacts = context.get_artifacts()
     outcomes = artifacts.load_outcomes()
 
@@ -333,8 +367,17 @@ def finish_all_attacks() -> str:
 
     print(f"\n  All attacks complete: {breached}/{total} succeeded")
 
-    return json.dumps({
+    return {
         "total_attacks": total,
         "successful_attacks": breached,
         "outcomes": summary_rows,
-    })
+    }
+
+
+@tool
+def finish_all_attacks() -> str:
+    """Signal that all attacks are complete. Returns a summary of all attack outcomes
+    from the artifact store. Call this after concluding all attacks, before the
+    reporter takes over.
+    """
+    return json.dumps(_build_finish_summary())

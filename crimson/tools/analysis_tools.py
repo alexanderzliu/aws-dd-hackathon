@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from strands import tool
 
-from crimson import context
+from crimson import config, context
 from crimson.models import AttackOutcome
 
 logger = logging.getLogger("crimson.tools.analysis")
@@ -83,6 +83,50 @@ def get_risk_heatmap() -> str:
         return json.dumps({"status": "ok", "results": results})
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e), "results": []})
+
+
+# ---------------------------------------------------------------------------
+# Plan registration (incremental)
+# ---------------------------------------------------------------------------
+
+_plan_item_count: int = 0
+
+
+@tool
+def register_planned_attack(
+    attack_name: str,
+    category: str,
+    strategy: str,
+    target_component_id: str = "",
+    priority: int = 1,
+) -> str:
+    """Register a single planned attack so it appears on the dashboard immediately.
+    Call this once per attack as you design the plan — do not wait until all
+    attacks are planned.
+
+    Args:
+        attack_name: Short descriptive name for this attack.
+        category: Attack category from: system_prompt_exfil, pii_exfil, secret_exfil, tool_misuse, policy_bypass, cross_tenant, other.
+        strategy: What the attack will do and what it hopes to extract.
+        target_component_id: Deterministic component ID to target (optional).
+        priority: Priority ranking (1 = highest).
+    """
+    global _plan_item_count
+    if _plan_item_count >= config.MAX_ATTACKS:
+        return json.dumps({
+            "error": f"Plan already has {config.MAX_ATTACKS} attacks (MAX_ATTACKS limit). Do NOT register more.",
+            "max_attacks": config.MAX_ATTACKS,
+        })
+    _plan_item_count += 1
+    item = {
+        "attack_name": attack_name,
+        "category": category,
+        "strategy": strategy,
+        "target_component_id": target_component_id or None,
+        "priority": priority,
+    }
+    context.emit_event("plan_item", "plan", {"attack": item, "index": _plan_item_count})
+    return json.dumps({"registered": True, "index": _plan_item_count, "max_attacks": config.MAX_ATTACKS})
 
 
 # ---------------------------------------------------------------------------

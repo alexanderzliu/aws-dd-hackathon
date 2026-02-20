@@ -49,7 +49,7 @@ REPORT QUALITY GUIDELINES:
 
 
 def create_reporter_agent() -> Agent:
-    model = BedrockModel(model_id=config.MODEL_ID, max_tokens=4096)
+    model = BedrockModel(model_id=config.MODEL_ID, max_tokens=8192)
     return Agent(
         name="CrimsonReporter",
         model=model,

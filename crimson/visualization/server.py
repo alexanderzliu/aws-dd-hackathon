@@ -80,10 +80,21 @@ def _load_scan_jsonl(scan_id: str) -> list[dict]:
     return results
 
 
-def _run(scan_id: str) -> None:
+_SCAN_MODES = {
+    "quick": {"max_attacks": config.MAX_ATTACKS, "max_turns": config.MAX_TURNS},
+    "deep": {"max_attacks": 10, "max_turns": 8},
+}
+
+
+def _run(scan_id: str, mode: str = "quick") -> None:
     """Run the pipeline in a background thread."""
     global _is_running
     from crimson.events import EventBus
+
+    # Apply scan mode overrides
+    limits = _SCAN_MODES.get(mode, _SCAN_MODES["quick"])
+    config.MAX_ATTACKS = limits["max_attacks"]
+    config.MAX_TURNS = limits["max_turns"]
 
     bus = EventBus.get(scan_id)
     try:
@@ -136,7 +147,7 @@ async def graph():
 # ---------------------------------------------------------------------------
 
 @app.post("/api/scan/start")
-def start_scan():
+async def start_scan(request: Request):
     """Start a new scan. Returns 409 if one is already running."""
     global _is_running
     with _scan_lock:
@@ -144,16 +155,26 @@ def start_scan():
             return JSONResponse(status_code=409, content={"error": "Scan already running"})
         _is_running = True
 
+    # Parse scan mode from request body
+    mode = "quick"
+    try:
+        body = await request.json()
+        mode = body.get("mode", "quick")
+    except Exception:
+        pass
+    if mode not in _SCAN_MODES:
+        mode = "quick"
+
     from crimson.events import EventBus
     from crimson.models import new_scan_id
 
     scan_id = new_scan_id()
     EventBus.create(scan_id)
 
-    thread = threading.Thread(target=_run, args=(scan_id,), daemon=True)
+    thread = threading.Thread(target=_run, args=(scan_id, mode), daemon=True)
     thread.start()
 
-    return {"scan_id": scan_id}
+    return {"scan_id": scan_id, "mode": mode}
 
 
 @app.get("/api/scans")
