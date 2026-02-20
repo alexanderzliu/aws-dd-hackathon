@@ -23,6 +23,7 @@
         <div class="top-bar-center">
             <nav class="nav-tabs">
                 <button class="nav-tab active" data-panel="home">HOME</button>
+                <button class="nav-tab" data-panel="metrics">METRICS</button>
                 <button class="nav-tab" data-panel="recon">RECON</button>
                 <button class="nav-tab" data-panel="plan">PLAN</button>
                 <button class="nav-tab" data-panel="attack">ATTACK</button>
@@ -32,6 +33,9 @@
 
         <div class="top-bar-right">
             <div class="scan-controls">
+                <select id="testee-selector" title="Select target agent">
+                    <option value="">-- TARGET AGENT --</option>
+                </select>
                 <select id="scan-selector" title="Select scan">
                     <option value="">-- SELECT SCAN --</option>
                 </select>
@@ -173,6 +177,77 @@
                         <h4>REPORT</h4>
                         <p>Aggregate findings, calculate risk scores, and generate a comprehensive hardening report with actionable remediations.</p>
                     </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================================================== -->
+        <!-- METRICS PANEL                                                  -->
+        <!-- ============================================================== -->
+        <div id="metrics-panel" class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    <span class="stage-tag">&#x25C8;</span> AGGREGATE METRICS
+                </h2>
+                <p class="panel-subtitle">Cross-scan security assessment overview</p>
+            </div>
+
+            <!-- KPI Cards -->
+            <div id="metrics-kpi" class="kpi-grid">
+                <!-- Populated by JS -->
+            </div>
+
+            <!-- Agent Security Scorecard -->
+            <section class="metrics-section">
+                <h3 class="section-heading">
+                    <span class="heading-decoration">///</span> Agent Security Scorecard
+                </h3>
+                <div id="metrics-agent-scorecard" class="agent-scorecard">
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+
+            <!-- Category Breakdown + Severity Distribution -->
+            <div class="metrics-row">
+                <section class="metrics-section metrics-section-grow">
+                    <h3 class="section-heading">
+                        <span class="heading-decoration">///</span> Category Breakdown
+                    </h3>
+                    <div id="metrics-categories" class="category-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+
+                <section class="metrics-section metrics-section-side">
+                    <h3 class="section-heading">
+                        <span class="heading-decoration">///</span> Severity Distribution
+                    </h3>
+                    <div id="metrics-severity" class="severity-bars">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+            </div>
+
+            <!-- Recent Breaches -->
+            <section class="metrics-section">
+                <h3 class="section-heading">
+                    <span class="heading-decoration">///</span> Recent Breaches
+                </h3>
+                <div class="table-wrapper">
+                    <table id="metrics-breaches-table" class="metrics-table">
+                        <thead>
+                            <tr>
+                                <th>AGENT</th>
+                                <th>ATTACK</th>
+                                <th>CATEGORY</th>
+                                <th>SEVERITY</th>
+                                <th>SUMMARY</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
                 </div>
             </section>
         </div>
