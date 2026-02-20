@@ -196,6 +196,14 @@ a { color: var(--red); text-decoration: none; }
 .graph-placeholder, .report-placeholder, .chat-placeholder { text-align: center; color: var(--text-dim); font-size: 0.8rem; }
 .placeholder-icon { font-size: 2rem; color: var(--border); margin-bottom: 0.5rem; }
 
+/* Incremental graph animations */
+.graph-container svg circle, .graph-container svg text { transition: cx 0.3s ease, cy 0.3s ease, x 0.3s ease, y 0.3s ease; }
+.graph-container svg line { transition: x1 0.3s ease, y1 0.3s ease, x2 0.3s ease, y2 0.3s ease; }
+.arch-node-enter { animation: nodePopIn 0.35s ease-out; }
+.arch-edge-enter { animation: edgeFadeIn 0.3s ease-out; }
+@keyframes nodePopIn { 0% { opacity: 0; transform: scale(0); } 60% { opacity: 1; transform: scale(1.15); } 100% { transform: scale(1); } }
+@keyframes edgeFadeIn { from { opacity: 0; stroke-dasharray: 100; stroke-dashoffset: 100; } to { opacity: 1; stroke-dashoffset: 0; } }
+
 /* ---- Recon Layout ---- */
 .recon-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 
@@ -251,6 +259,7 @@ a { color: var(--red); text-decoration: none; }
 .badge-low { background: #666; color: var(--text-bright); }
 .badge-category { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); }
 .badge-running { background: var(--cyan-dim); border: 1px solid var(--cyan); color: var(--cyan); }
+.badge-pending { background: var(--surface-2); border: 1px solid var(--amber); color: var(--amber); }
 
 /* ---- Report ---- */
 .report-layout { max-width: 900px; }

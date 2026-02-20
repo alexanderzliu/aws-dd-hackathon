@@ -107,8 +107,10 @@ def map_architecture_to_neo4j(components: str, relationships: str) -> str:
                 component_type=c["component_type"],
                 description=c.get("description", ""),
             )
-            validated_components.append(spec.model_dump())
+            dumped = spec.model_dump()
+            validated_components.append(dumped)
             comp_successes += 1
+            context.emit_event("component_discovered", "recon", {"component": dumped})
         except (KeyError, Exception) as e:
             logger.warning("Skipping invalid component: %s — %s", c, e)
             comp_failures += 1
@@ -121,8 +123,10 @@ def map_architecture_to_neo4j(components: str, relationships: str) -> str:
                 rel_type=r["rel_type"],
                 properties=r.get("properties", {}),
             )
-            validated_relationships.append(spec.model_dump())
+            dumped = spec.model_dump()
+            validated_relationships.append(dumped)
             rel_successes += 1
+            context.emit_event("relationship_discovered", "recon", {"relationship": dumped})
         except (KeyError, Exception) as e:
             logger.warning("Skipping invalid relationship: %s — %s", r, e)
             rel_failures += 1

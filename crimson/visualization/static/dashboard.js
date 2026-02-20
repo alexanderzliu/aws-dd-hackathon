@@ -10,6 +10,15 @@ let attackIndex = 0;
 let totalComplete = 0;
 let totalBreached = 0;
 let totalDefended = 0;
+let currentPipelineStage = null;
+
+/* Incremental architecture graph state */
+let archComponents = [];
+let archRelationships = {};
+let archNodes = {};
+let archRenderQueue = [];
+let archRenderBusy = false;
+const ARCH_STAGGER_MS = 180;
 
 const STAGES = ['recon', 'plan', 'attack', 'report'];
 
@@ -92,9 +101,12 @@ function handleEvent(event) {
     if (stage && STAGES.indexOf(stage) >= 0) updatePipelineStage(stage);
     switch (type) {
         case 'source_read': renderSourceRead(data); break;
-        case 'architecture_mapped': renderArchitecture(data); break;
+        case 'component_discovered': queueArchRender(function() { renderComponentDiscovered(data); }); break;
+        case 'relationship_discovered': queueArchRender(function() { renderRelationshipDiscovered(data); }); break;
+        case 'architecture_mapped': flushArchRenderQueue(function() { renderArchitecture(data); }); break;
         case 'attack_surface_analyzed': renderPlanActivity('Attack surface analyzed', data); break;
         case 'data_flows_mapped': renderPlanActivity('Data flows mapped', data); break;
+        case 'plan_ready': renderPlanReady(data); break;
         case 'attack_started': renderAttackStarted(data); break;
         case 'turn': renderTurn(data); break;
         case 'attack_concluded': renderAttackConcluded(data); break;
@@ -108,6 +120,8 @@ function handleEvent(event) {
 function updatePipelineStage(activeStage) {
     var idx = STAGES.indexOf(activeStage);
     if (idx === -1) return;
+    var isNewStage = (activeStage !== currentPipelineStage);
+    currentPipelineStage = activeStage;
     document.querySelectorAll('.pipeline-stage').forEach(function(el, i) {
         el.classList.remove('stage-active', 'stage-complete');
         if (i < idx) el.classList.add('stage-complete');
@@ -116,8 +130,10 @@ function updatePipelineStage(activeStage) {
     document.querySelectorAll('.pipeline-connector').forEach(function(el, i) {
         el.classList.toggle('connector-active', i < idx);
     });
-    showPanel(activeStage + '-panel');
-    setActiveNav(activeStage);
+    if (isNewStage) {
+        showPanel(activeStage + '-panel');
+        setActiveNav(activeStage);
+    }
     var statusMap = { recon: 'recon-status', plan: 'plan-status', attack: 'attack-status' };
     Object.keys(statusMap).forEach(function(s) {
         var el = document.getElementById(statusMap[s]);
@@ -188,6 +204,134 @@ function drawArchGraph(container, components, relationships) {
     container.appendChild(svg);
 }
 
+/* ---- Renderers: Incremental Recon (staggered queue) ---- */
+function queueArchRender(fn) {
+    archRenderQueue.push(fn);
+    if (!archRenderBusy) drainArchQueue();
+}
+function drainArchQueue() {
+    if (archRenderQueue.length === 0) { archRenderBusy = false; return; }
+    archRenderBusy = true;
+    var fn = archRenderQueue.shift();
+    fn();
+    setTimeout(drainArchQueue, ARCH_STAGGER_MS);
+}
+function flushArchRenderQueue(finalFn) {
+    /* Fast-forward remaining queued items then run finalFn */
+    while (archRenderQueue.length) { archRenderQueue.shift()(); }
+    archRenderBusy = false;
+    finalFn();
+}
+
+function ensureArchSvg() {
+    var container = document.getElementById('arch-graph');
+    if (!container) return null;
+    var svg = container.querySelector('svg');
+    if (!svg) {
+        clearPlaceholder(container);
+        container.innerHTML = '';
+        var w = container.clientWidth || 600, h = 350;
+        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('width', w); svg.setAttribute('height', h);
+        container.appendChild(svg);
+    }
+    return svg;
+}
+
+function layoutArchNodes() {
+    var container = document.getElementById('arch-graph');
+    if (!container) return;
+    var w = container.clientWidth || 600, h = 350, cx = w/2, cy = h/2;
+    var radius = Math.min(cx, cy) - 60;
+    var count = archComponents.length;
+    archComponents.forEach(function(c, i) {
+        var angle = (2*Math.PI*i)/count - Math.PI/2;
+        archNodes[c.component_id] = { x: cx+radius*Math.cos(angle), y: cy+radius*Math.sin(angle), name: c.name, type: c.component_type };
+    });
+}
+
+function renderComponentDiscovered(data) {
+    var c = data.component;
+    if (!c || archNodes[c.component_id]) return;
+    archComponents.push(c);
+    layoutArchNodes();
+
+    var svg = ensureArchSvg();
+    if (!svg) return;
+    var typeColors = { agent:'#4A90D9', tool:'#6C5CE7', datastore:'#00B894', external:'#FD79A8' };
+
+    /* Smoothly transition existing nodes/edges to new positions */
+    Object.keys(archNodes).forEach(function(id) {
+        var n = archNodes[id];
+        var g = svg.querySelector('[data-node-id="' + id + '"]');
+        if (g) {
+            /* Animate existing node to new position */
+            g.querySelector('circle').setAttribute('cx', n.x);
+            g.querySelector('circle').setAttribute('cy', n.y);
+            g.querySelector('text').setAttribute('x', n.x);
+            g.querySelector('text').setAttribute('y', n.y + 30);
+        }
+    });
+    /* Update existing edge positions */
+    svg.querySelectorAll('[data-edge-key]').forEach(function(line) {
+        var parts = line.getAttribute('data-edge-key').split('|');
+        var from = archNodes[parts[0]], to = archNodes[parts[1]];
+        if (from && to) {
+            line.setAttribute('x1', from.x); line.setAttribute('y1', from.y);
+            line.setAttribute('x2', to.x); line.setAttribute('y2', to.y);
+        }
+    });
+
+    /* Add new node with pop-in animation */
+    var n = archNodes[c.component_id];
+    var color = typeColors[c.component_type] || '#666';
+    var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('data-node-id', c.component_id);
+    g.setAttribute('class', 'arch-node-enter');
+    var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', n.x); circle.setAttribute('cy', n.y); circle.setAttribute('r', '18');
+    circle.setAttribute('fill', color); circle.setAttribute('fill-opacity', '0.2');
+    circle.setAttribute('stroke', color); circle.setAttribute('stroke-width', '2');
+    g.appendChild(circle);
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', n.x); t.setAttribute('y', n.y + 30);
+    t.setAttribute('text-anchor', 'middle'); t.setAttribute('fill', '#e0e0e0');
+    t.setAttribute('font-size', '10'); t.setAttribute('font-family', "'Fira Code', monospace");
+    t.textContent = n.name.length > 15 ? n.name.slice(0, 12) + '...' : n.name;
+    g.appendChild(t);
+    svg.appendChild(g);
+
+    var log = document.getElementById('recon-log');
+    appendLog(log, 'Component discovered: ' + c.name + ' [' + c.component_type + ']', 'text-cyan');
+}
+
+function renderRelationshipDiscovered(data) {
+    var r = data.relationship;
+    if (!r) return;
+    var key = r.from_id + '->' + r.to_id + ':' + r.rel_type;
+    if (archRelationships[key]) return;
+    archRelationships[key] = r;
+
+    var svg = ensureArchSvg();
+    if (!svg) return;
+    var from = archNodes[r.from_id], to = archNodes[r.to_id];
+    if (from && to) {
+        /* Insert edge before node groups */
+        var firstG = svg.querySelector('g');
+        var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('data-edge-key', r.from_id + '|' + r.to_id);
+        line.setAttribute('x1', from.x); line.setAttribute('y1', from.y);
+        line.setAttribute('x2', to.x); line.setAttribute('y2', to.y);
+        line.setAttribute('stroke', '#1a1a2e'); line.setAttribute('stroke-width', '1.5');
+        line.setAttribute('class', 'arch-edge-enter');
+        if (firstG) svg.insertBefore(line, firstG);
+        else svg.appendChild(line);
+    }
+
+    var log = document.getElementById('recon-log');
+    appendLog(log, 'Relationship: ' + r.rel_type + ' (' + (r.from_id||'').split('::').pop() + ' -> ' + (r.to_id||'').split('::').pop() + ')');
+}
+
 /* ---- Renderers: Plan ---- */
 function renderPlanActivity(label, data) {
     var log = document.getElementById('plan-log');
@@ -199,15 +343,53 @@ function renderPlanActivity(label, data) {
     });
 }
 
+function renderPlanReady(data) {
+    var planAttacks = data.attacks || [];
+    var tbody = document.querySelector('#attack-plan-table tbody');
+    tbody.innerHTML = '';
+    planAttacks.forEach(function(a, i) {
+        var tr = document.createElement('tr');
+        tr.setAttribute('data-plan-name', a.attack_name || '');
+        tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + escapeHtml(a.attack_name) + '</td><td><span class="badge badge-category">' + escapeHtml(a.category) + '</span></td><td>' + escapeHtml(a.strategy || '').slice(0,100) + '</td><td><span class="badge badge-pending">PENDING</span></td>';
+        tbody.appendChild(tr);
+    });
+    document.getElementById('plan-count').textContent = planAttacks.length + ' attacks planned';
+    var log = document.getElementById('plan-log');
+    clearPlaceholder(log);
+    appendLog(log, 'Attack plan registered: ' + planAttacks.length + ' attacks queued', 'text-cyan');
+}
+
 function renderAttackStarted(data) {
     attackIndex++;
     attacks[data.attack_id] = { index: attackIndex, name: data.attack_name, category: data.category, strategy: data.strategy, turns: [], result: null };
+
+    /* Try to find an existing plan row by attack name and update it */
+    var existingRow = null;
     var tbody = document.querySelector('#attack-plan-table tbody');
-    var tr = document.createElement('tr');
-    tr.id = 'plan-row-' + data.attack_id;
-    tr.innerHTML = '<td>' + attackIndex + '</td><td>' + escapeHtml(data.attack_name) + '</td><td><span class="badge badge-category">' + escapeHtml(data.category) + '</span></td><td>' + escapeHtml(data.strategy).slice(0,100) + '</td><td><span class="badge badge-running">RUNNING</span></td>';
-    tbody.appendChild(tr);
-    document.getElementById('plan-count').textContent = attackIndex + ' attacks';
+    var rows = tbody.querySelectorAll('tr[data-plan-name]');
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].getAttribute('data-plan-name') === data.attack_name && !rows[i].id) {
+            existingRow = rows[i];
+            break;
+        }
+    }
+
+    if (existingRow) {
+        /* Update existing plan row: set ID for conclude matching, update status */
+        existingRow.id = 'plan-row-' + data.attack_id;
+        var statusCell = existingRow.cells[4];
+        if (statusCell) {
+            statusCell.innerHTML = '<span class="badge badge-running">RUNNING</span>';
+        }
+    } else {
+        /* No plan_ready row found — create a new row (fallback) */
+        var tr = document.createElement('tr');
+        tr.id = 'plan-row-' + data.attack_id;
+        tr.innerHTML = '<td>' + attackIndex + '</td><td>' + escapeHtml(data.attack_name) + '</td><td><span class="badge badge-category">' + escapeHtml(data.category) + '</span></td><td>' + escapeHtml(data.strategy).slice(0,100) + '</td><td><span class="badge badge-running">RUNNING</span></td>';
+        tbody.appendChild(tr);
+        document.getElementById('plan-count').textContent = attackIndex + ' attacks';
+    }
+
     var chat = document.getElementById('attack-chat');
     clearPlaceholder(chat);
     var header = document.createElement('div');
@@ -346,6 +528,8 @@ function showToast(msg) {
 }
 function resetUI() {
     attacks = {}; attackIndex = 0; totalComplete = 0; totalBreached = 0; totalDefended = 0;
+    currentPipelineStage = null; archComponents = []; archRelationships = {}; archNodes = {};
+    archRenderQueue = []; archRenderBusy = false;
     document.getElementById('score-total').textContent = '0';
     document.getElementById('score-breached').textContent = '0';
     document.getElementById('score-defended').textContent = '0';

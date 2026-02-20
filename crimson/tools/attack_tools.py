@@ -15,6 +15,42 @@ logger = logging.getLogger("crimson.tools.attack")
 
 # Module-level state for tracking active attacks
 _active_attacks: dict[str, dict] = {}
+_completed_attacks: int = 0
+_plan_registered: bool = False
+
+
+@tool
+def register_attack_plan(attacks_json: str) -> str:
+    """Register the full attack plan so the dashboard can show all planned attacks
+    immediately. Call this ONCE before starting any individual attacks.
+
+    Args:
+        attacks_json: JSON array of attack objects, each with keys: attack_name, category, strategy, target_component_id (optional), priority (optional).
+    """
+    global _plan_registered
+    try:
+        attacks = json.loads(attacks_json)
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid JSON: {e}"})
+
+    if not isinstance(attacks, list):
+        return json.dumps({"error": "attacks_json must be a JSON array"})
+
+    plan_items = []
+    for a in attacks:
+        plan_items.append({
+            "attack_name": a.get("attack_name", ""),
+            "category": a.get("category", "other"),
+            "strategy": a.get("strategy", ""),
+            "target_component_id": a.get("target_component_id"),
+            "priority": a.get("priority", 1),
+        })
+
+    context.emit_event("plan_ready", "plan", {"attacks": plan_items})
+    _plan_registered = True
+
+    logger.info("Attack plan registered: %d attacks", len(plan_items))
+    return json.dumps({"registered": True, "attack_count": len(plan_items)})
 
 
 @tool
@@ -27,6 +63,14 @@ def start_attack(attack_name: str, strategy: str, category: str) -> str:
         strategy: What you plan to do and what you hope to extract.
         category: Attack category from: system_prompt_exfil, pii_exfil, secret_exfil, tool_misuse, policy_bypass, cross_tenant, other.
     """
+    # Enforce max attacks limit
+    global _completed_attacks
+    total_started = len(_active_attacks) + _completed_attacks
+    if total_started >= config.MAX_ATTACKS:
+        return json.dumps({
+            "error": f"Max attacks ({config.MAX_ATTACKS}) reached — call finish_all_attacks.",
+        })
+
     # Validate category
     try:
         cat = AttackCategory(category)
@@ -258,6 +302,7 @@ def conclude_attack(
 
     # Clean up
     del _active_attacks[conversation_id]
+    _completed_attacks += 1
 
     return json.dumps({"recorded": True, "success": success, "severity": severity})
 

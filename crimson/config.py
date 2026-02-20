@@ -23,7 +23,7 @@ DD_APP_KEY = os.environ.get("DD_APP_KEY", "")
 DD_SITE = os.environ.get("DD_SITE", "datadoghq.com")
 
 # Limits
-MAX_ATTACKS = int(os.environ.get("CRIMSON_MAX_ATTACKS", "7"))
+MAX_ATTACKS = int(os.environ.get("CRIMSON_MAX_ATTACKS", "3"))
 MAX_TURNS = int(os.environ.get("CRIMSON_MAX_TURNS", "8"))
 TIMEOUT = int(os.environ.get("CRIMSON_TIMEOUT", "900"))
 
