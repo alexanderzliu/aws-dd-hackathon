@@ -145,16 +145,14 @@ def query_past_attacks(testee_module: str, time_range: str = "now-7d") -> str:
     for scan in past_scans:
         results["local_scans"].append(scan.model_dump())
 
-    # Check Datadog if available
-    tracer = context.get_tracer()
-    if tracer:
-        try:
-            from crimson.observability.analytics import AttackAnalytics
-            analytics = AttackAnalytics()
-            dd_results = analytics.get_past_attacks(testee_module, time_range)
-            results["datadog_attacks"] = dd_results
-        except Exception as e:
-            logger.warning("Datadog query failed: %s", e)
+    # Check Datadog
+    try:
+        from crimson.observability.analytics import AttackAnalytics
+        analytics = AttackAnalytics()
+        dd_results = analytics.get_past_attacks(testee_module, time_range)
+        results["datadog_attacks"] = dd_results
+    except Exception as e:
+        logger.warning("Datadog query failed: %s", e)
 
     return json.dumps(results, default=str)
 
@@ -240,13 +238,9 @@ def finish_assessment(summary: str) -> str:
     print(f"\n  {summary}")
     print(f"{'=' * 78}")
 
-    # Flush Datadog (best-effort)
+    # Flush Datadog
     tracer = context.get_tracer()
-    if tracer:
-        try:
-            tracer.flush()
-        except Exception:
-            pass
+    tracer.flush()
 
     return json.dumps({
         "status": "complete",

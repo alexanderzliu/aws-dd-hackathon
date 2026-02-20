@@ -19,10 +19,10 @@ class AttackAnalytics:
 
     def __init__(self, service: str = "crimson") -> None:
         self._service = service
-        self._enabled = bool(config.DD_API_KEY and config.DD_APP_KEY)
-        if not self._enabled:
-            logger.info(
-                "DD_API_KEY or DD_APP_KEY not set -- AttackAnalytics disabled"
+        if not config.DD_API_KEY or not config.DD_APP_KEY:
+            raise RuntimeError(
+                "DD_API_KEY and DD_APP_KEY are required. "
+                "Set them in your environment or .env file."
             )
 
     # ------------------------------------------------------------------
@@ -38,11 +38,7 @@ class AttackAnalytics:
 
         Returns a list of dicts with keys:
             attack_id, attack_category, success, severity, timestamp
-        Empty list if DD is not configured.
         """
-        if not self._enabled:
-            return []
-
         try:
             raw_spans = self._list_spans(
                 query=f"service:{self._service} @tags.testee_id:{testee_id}",

@@ -53,19 +53,19 @@ def start_attack(attack_name: str, strategy: str, category: str) -> str:
         "testee_id": scan_info.testee_id,
     }
 
-    # Datadog span (best-effort)
+    # Datadog: open workflow span for this attack
     tracer = context.get_tracer()
-    if tracer:
-        try:
-            tracer.start_attack_span(
-                attack_id=attack_id,
-                attack_name=attack_name,
-                category=cat.value,
-                scan_id=scan_info.scan_id,
-                testee_id=scan_info.testee_id,
-            )
-        except Exception as e:
-            logger.warning("Datadog span start failed: %s", e)
+    span_ctx = tracer.attack_workflow_span(
+        scan_id=scan_info.scan_id,
+        testee_id=scan_info.testee_id,
+        attack_id=attack_id,
+        attack_name=attack_name,
+        attack_category=cat.value,
+        session_id=attack_id,
+    )
+    span = span_ctx.__enter__()
+    _active_attacks[attack_id]["_dd_span_ctx"] = span_ctx
+    _active_attacks[attack_id]["_dd_span"] = span
 
     print(f"\n{'=' * 78}")
     print(f"  ATTACK: {attack_name}")
@@ -110,18 +110,16 @@ def send_message(conversation_id: str, message: str) -> str:
 
     print(f"  [Target -> Red Team] {str(response)[:200]}{'...' if len(str(response)) > 200 else ''}")
 
-    # Datadog span (best-effort)
+    # Datadog: annotate turn on the active attack span
     tracer = context.get_tracer()
-    if tracer:
-        try:
-            tracer.annotate_turn(
-                attack_id=conversation_id,
-                turn=turn,
-                message=message,
-                response=str(response),
-            )
-        except Exception:
-            pass
+    span = attack_state.get("_dd_span")
+    if span:
+        tracer.annotate(
+            span,
+            input_data={"turn": turn, "message": message[:500]},
+            output_data={"response": str(response)[:500]},
+            metrics={"turn": float(turn)},
+        )
 
     return json.dumps({"response": str(response), "turn": turn})
 
@@ -167,16 +165,10 @@ def conclude_attack(
     except ValueError:
         cat = AttackCategory.other
 
-    # Get Datadog trace IDs (best-effort)
-    dd_trace_id = None
-    dd_span_id = None
+    # Get Datadog trace IDs
     tracer = context.get_tracer()
-    if tracer:
-        try:
-            dd_trace_id = tracer.get_current_trace_id()
-            dd_span_id = tracer.get_current_span_id()
-        except Exception:
-            pass
+    dd_trace_id = tracer.get_current_trace_id()
+    dd_span_id = tracer.get_current_span_id()
 
     outcome = AttackOutcome(
         scan_id=attack_state["scan_id"],
@@ -214,17 +206,20 @@ def conclude_attack(
             except Exception as e:
                 logger.warning("Neo4j vulnerability write failed: %s", e)
 
-    # End Datadog span (best-effort)
-    if tracer:
-        try:
-            tracer.end_attack_span(
-                attack_id=conversation_id,
-                success=success,
-                severity=sev.value,
-                category=cat.value,
-            )
-        except Exception:
-            pass
+    # Annotate and close the Datadog attack span
+    span = attack_state.get("_dd_span")
+    if span:
+        tracer.annotate_attack_result(
+            span,
+            success=success,
+            severity=sev.value,
+            summary=summary,
+            evidence=evidence,
+            turn_count=attack_state["turn_count"],
+        )
+    span_ctx = attack_state.get("_dd_span_ctx")
+    if span_ctx:
+        span_ctx.__exit__(None, None, None)
 
     verdict = "!! BREACHED !!" if success else "DEFENDED"
     print(f"\n  ┌─ Attack Result {'─' * 57}┐")

@@ -58,18 +58,16 @@ def init(testee_module: str) -> None:
     else:
         logger.info("NEO4J_URI not set — skipping Neo4j")
 
-    # Datadog (best-effort)
-    if config.DD_API_KEY:
-        try:
-            from crimson.observability.tracer import LLMSecurityTracer
-            _tracer = LLMSecurityTracer()
-            _tracer.init()
-            logger.info("Datadog LLM Observability enabled")
-        except Exception as exc:
-            logger.warning("Datadog unavailable (continuing without): %s", exc)
-            _tracer = None
-    else:
-        logger.info("DD_API_KEY not set — skipping Datadog")
+    # Datadog (mandatory)
+    if not config.DD_API_KEY:
+        raise RuntimeError(
+            "DD_API_KEY is required. Set it in your environment or .env file. "
+            "Get one at https://app.datadoghq.com/organization-settings/api-keys"
+        )
+    from crimson.observability.tracer import LLMSecurityTracer
+    _tracer = LLMSecurityTracer()
+    _tracer.init()
+    logger.info("Datadog LLM Observability enabled")
 
     # Testee adapter
     from crimson.adapters.strands_adapter import StrandsTesteeAdapter
@@ -93,7 +91,9 @@ def get_adapter() -> "StrandsTesteeAdapter":
     return _adapter
 
 
-def get_tracer() -> Optional["LLMSecurityTracer"]:
+def get_tracer() -> "LLMSecurityTracer":
+    if _tracer is None:
+        raise RuntimeError("Crimson not initialized — call context.init() first")
     return _tracer
 
 

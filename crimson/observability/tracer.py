@@ -34,26 +34,23 @@ class LLMSecurityTracer:
     # ------------------------------------------------------------------
 
     def init(self) -> None:
-        """Enable Datadog LLM Observability.  No-op when DD_API_KEY is empty."""
+        """Enable Datadog LLM Observability. Raises if DD_API_KEY is not set."""
         if not config.DD_API_KEY:
-            logger.info("DD_API_KEY not set -- Datadog tracing disabled")
-            return
-        try:
-            from ddtrace.llmobs import LLMObs
+            raise RuntimeError("DD_API_KEY is required for Datadog observability")
 
-            LLMObs.enable(
-                ml_app=self.ml_app,
-                integrations_enabled=True,
-                agentless_enabled=True,
-                site=config.DD_SITE,
-                api_key=config.DD_API_KEY,
-                env=self.env,
-                service=self.service,
-            )
-            self._enabled = True
-            logger.info("Datadog LLM Observability enabled (ml_app=%s)", self.ml_app)
-        except Exception:
-            logger.warning("Failed to enable Datadog LLM Observability", exc_info=True)
+        from ddtrace.llmobs import LLMObs
+
+        LLMObs.enable(
+            ml_app=self.ml_app,
+            integrations_enabled=True,
+            agentless_enabled=True,
+            site=config.DD_SITE,
+            api_key=config.DD_API_KEY,
+            env=self.env,
+            service=self.service,
+        )
+        self._enabled = True
+        logger.info("Datadog LLM Observability enabled (ml_app=%s)", self.ml_app)
 
     def flush(self) -> None:
         """Flush pending spans to Datadog."""
