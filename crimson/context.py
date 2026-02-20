@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from crimson import config
 from crimson.models import ScanInfo, new_scan_id
@@ -25,11 +25,12 @@ _scan_info: Optional[ScanInfo] = None
 _initialized = False
 
 
-def init(testee_module: str) -> None:
+def init(testee_module: str, scan_id: str | None = None) -> None:
     """Call once at startup from main.py. Creates scan_id and initializes all singletons."""
     global _neo4j, _adapter, _tracer, _artifacts, _scan_info, _initialized
 
-    scan_id = new_scan_id()
+    if scan_id is None:
+        scan_id = new_scan_id()
     _scan_info = ScanInfo(
         scan_id=scan_id,
         testee_id=testee_module,
@@ -107,3 +108,13 @@ def get_scan_info() -> ScanInfo:
     if _scan_info is None:
         raise RuntimeError("Crimson not initialized — call context.init() first")
     return _scan_info
+
+
+def emit_event(event_type: str, stage: str, data: Any = None) -> None:
+    """Emit a pipeline event. No-ops gracefully when not initialized or no bus exists."""
+    if _scan_info is None:
+        return
+    from crimson.events import EventBus
+    bus = EventBus.get(_scan_info.scan_id)
+    if bus:
+        bus.emit(event_type, stage, data)

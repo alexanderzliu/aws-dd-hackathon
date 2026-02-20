@@ -172,3 +172,36 @@ def test_artifact_store():
             successful_count=0,
             max_severity=3.0,
         )
+
+
+def test_emit_event_noop_before_init():
+    """emit_event should no-op gracefully when context is not initialized."""
+    from crimson import context
+
+    original = context._scan_info
+    context._scan_info = None
+    try:
+        context.emit_event("test", "test", {"foo": "bar"})
+    finally:
+        context._scan_info = original
+
+
+def test_emit_event_delegates():
+    """emit_event should delegate to EventBus when initialized."""
+    from crimson import context
+    from crimson.events import EventBus
+    from crimson.models import ScanInfo
+
+    scan = ScanInfo(scan_id="test-emit-scan", testee_id="test", model_id="m")
+    bus = EventBus.create("test-emit-scan")
+    original = context._scan_info
+    context._scan_info = scan
+    try:
+        context.emit_event("test_event", "test", {"key": "value"})
+        assert not bus._queue.empty()
+        event = bus._queue.get_nowait()
+        assert event["type"] == "test_event"
+        assert event["data"]["key"] == "value"
+    finally:
+        context._scan_info = original
+        EventBus.remove("test-emit-scan")

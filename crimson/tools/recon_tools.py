@@ -58,6 +58,10 @@ def read_testee_source(testee_module_path: str) -> str:
             "datastore_ids": data_ids,
         },
     }
+    context.emit_event("source_read", "recon", {
+        "testee_id": testee_id,
+        "tool_count": len(source_info.get("tool_specs", [])),
+    })
     return json.dumps(result, indent=2, default=str)
 
 
@@ -125,6 +129,10 @@ def map_architecture_to_neo4j(components: str, relationships: str) -> str:
 
     # Write to JSONL artifact store (always)
     artifacts.log_architecture(validated_components, validated_relationships)
+    context.emit_event("architecture_mapped", "recon", {
+        "components": validated_components,
+        "relationships": validated_relationships,
+    })
 
     # Write to Neo4j (best-effort)
     neo4j = context.get_neo4j()

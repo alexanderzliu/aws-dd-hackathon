@@ -30,6 +30,7 @@ def get_attack_surface() -> str:
         from crimson.graph.queries import get_attack_surface as _query
         scan_info = context.get_scan_info()
         results = _query(neo4j, scan_info.testee_id)
+        context.emit_event("attack_surface_analyzed", "plan", {"results": results})
         return json.dumps({"status": "ok", "results": results})
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e), "results": []})
@@ -63,6 +64,7 @@ def get_data_flows() -> str:
         from crimson.graph.queries import get_data_flows as _query
         scan_info = context.get_scan_info()
         results = _query(neo4j, scan_info.testee_id)
+        context.emit_event("data_flows_mapped", "plan", {"results": results})
         return json.dumps({"status": "ok", "results": results})
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e), "results": []})
@@ -170,6 +172,7 @@ def generate_report(report_markdown: str) -> str:
     """
     artifacts = context.get_artifacts()
     artifacts.log_report(report_markdown)
+    context.emit_event("report_generated", "report", {"report_markdown": report_markdown})
 
     # Print summary
     lines = report_markdown.strip().split("\n")
@@ -241,6 +244,12 @@ def finish_assessment(summary: str) -> str:
     # Flush Datadog
     tracer = context.get_tracer()
     tracer.flush()
+
+    context.emit_event("pipeline_complete", "report", {
+        "scan_id": scan_info.scan_id,
+        "total": total,
+        "breached": breached,
+    })
 
     return json.dumps({
         "status": "complete",

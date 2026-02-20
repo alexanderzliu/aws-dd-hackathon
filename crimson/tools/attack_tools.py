@@ -53,6 +53,13 @@ def start_attack(attack_name: str, strategy: str, category: str) -> str:
         "testee_id": scan_info.testee_id,
     }
 
+    context.emit_event("attack_started", "attack", {
+        "attack_id": attack_id,
+        "attack_name": attack_name,
+        "category": cat.value,
+        "strategy": strategy,
+    })
+
     # Datadog: open workflow span for this attack
     tracer = context.get_tracer()
     span_ctx = tracer.attack_workflow_span(
@@ -110,16 +117,27 @@ def send_message(conversation_id: str, message: str) -> str:
 
     print(f"  [Target -> Red Team] {str(response)[:200]}{'...' if len(str(response)) > 200 else ''}")
 
-    # Datadog: annotate turn on the active attack span
+    context.emit_event("turn", "attack", {
+        "attack_id": conversation_id,
+        "turn": turn,
+        "message": message,
+        "response": str(response),
+    })
+
+    # Datadog: create a child span for this turn under the attack workflow
     tracer = context.get_tracer()
-    span = attack_state.get("_dd_span")
-    if span:
-        tracer.annotate(
-            span,
-            input_data={"turn": turn, "message": message[:500]},
-            output_data={"response": str(response)[:500]},
-            metrics={"turn": float(turn)},
-        )
+    with tracer.tool_span(
+        f"turn_{turn}",
+        attack_id=conversation_id,
+        attack_name=attack_state.get("attack_name", ""),
+    ) as turn_span:
+        if turn_span:
+            tracer.annotate(
+                turn_span,
+                input_data={"turn": turn, "message": message[:500]},
+                output_data={"response": str(response)[:500]},
+                metrics={"turn": float(turn)},
+            )
 
     return json.dumps({"response": str(response), "turn": turn})
 
@@ -194,6 +212,13 @@ def conclude_attack(
     # Write to JSONL artifact store (always)
     artifacts = context.get_artifacts()
     artifacts.log_attack_outcome(outcome)
+    context.emit_event("attack_concluded", "attack", {
+        "attack_name": attack_state["attack_name"],
+        "attack_id": attack_state["attack_id"],
+        "success": success,
+        "severity": severity,
+        "summary": summary,
+    })
 
     # Write vulnerability to Neo4j (best-effort, only on success)
     if success:

@@ -19,12 +19,12 @@ class Neo4jConnection:
         uri: str | None = None,
         user: str | None = None,
         password: str | None = None,
-        database: str = "neo4j",
+        database: str | None = None,
     ):
         self.uri = uri or config.NEO4J_URI
         self.user = user or config.NEO4J_USER
         self.password = password or config.NEO4J_PASSWORD
-        self.database = database
+        self.database = database or config.NEO4J_DATABASE
         self.driver = None
 
     # -- lifecycle -------------------------------------------------------------
