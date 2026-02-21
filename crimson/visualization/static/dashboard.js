@@ -590,7 +590,16 @@ function loadHistoricalScan(scanId) {
         if (!data) return;
         if (data.architecture) { renderArchitecture(data.architecture); showPanel('recon-panel'); setActiveNav('recon'); }
         if (data.attacks && data.attacks.length) {
-            data.attacks.forEach(function(a) { renderAttackConcluded({ attack_id: a.attack_id, attack_name: a.attack_name, success: a.success, severity: a.severity, summary: a.summary }); });
+            var tbody = document.querySelector('#attack-plan-table tbody');
+            data.attacks.forEach(function(a, i) {
+                var tr = document.createElement('tr');
+                var bc = a.success ? 'badge-breached' : 'badge-defended';
+                var statusText = a.success ? 'BREACHED' : 'DEFENDED';
+                tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + escapeHtml(a.attack_name) + '</td><td><span class="badge badge-category">' + escapeHtml(a.attack_category) + '</span></td><td>' + escapeHtml(a.summary || '').slice(0, 100) + '</td><td><span class="badge ' + bc + '">' + statusText + '</span></td>';
+                tbody.appendChild(tr);
+                renderAttackConcluded({ attack_id: a.attack_id, attack_name: a.attack_name, success: a.success, severity: a.severity, summary: a.summary });
+            });
+            document.getElementById('plan-count').textContent = data.attacks.length + ' attacks';
             showPanel('attack-panel'); setActiveNav('attack');
         }
         if (data.report) {
