@@ -35,6 +35,7 @@ function initDashboard() {
             showPanel(tab.dataset.panel + '-panel');
             document.querySelectorAll('.nav-tab').forEach(function(t) { t.classList.remove('active'); });
             tab.classList.add('active');
+            if (tab.dataset.panel === 'metrics') loadMetrics();
         });
     });
     document.querySelectorAll('.pipeline-stage').forEach(function(el) {
@@ -51,6 +52,24 @@ function initDashboard() {
         });
     });
     loadScanList();
+    loadTestees();
+    loadMetrics();
+}
+
+/* ---- Testee List ---- */
+function loadTestees() {
+    fetch('/api/testees').then(function(r) { return r.json(); }).then(function(data) {
+        var sel = document.getElementById('testee-selector');
+        while (sel.options.length > 1) sel.remove(1);
+        var testees = data.testees || [];
+        testees.forEach(function(t, i) {
+            var opt = document.createElement('option');
+            opt.value = t.module;
+            opt.textContent = t.label;
+            if (i === 0) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }).catch(function(e) { console.error('Failed to load testees:', e); });
 }
 
 /* ---- Scan List ---- */
@@ -70,6 +89,12 @@ function loadScanList() {
 
 /* ---- Start Scan ---- */
 function startScan() {
+    var testeeSel = document.getElementById('testee-selector');
+    var testee = testeeSel && testeeSel.value ? testeeSel.value : '';
+    if (!testee) {
+        showToast('Please select a target agent first');
+        return;
+    }
     var btn = document.getElementById('start-scan-btn');
     btn.disabled = true;
     btn.textContent = 'RUNNING...';
@@ -77,7 +102,7 @@ function startScan() {
     fetch('/api/scan/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: currentScanMode })
+        body: JSON.stringify({ testee: testee, mode: currentScanMode })
     }).then(function(r) {
         if (r.status === 409) { showToast('Scan already running'); enableStartButton(); return null; }
         if (!r.ok) throw new Error('Failed to start scan');
@@ -565,7 +590,16 @@ function loadHistoricalScan(scanId) {
         if (!data) return;
         if (data.architecture) { renderArchitecture(data.architecture); showPanel('recon-panel'); setActiveNav('recon'); }
         if (data.attacks && data.attacks.length) {
-            data.attacks.forEach(function(a) { renderAttackConcluded({ attack_id: a.attack_id, attack_name: a.attack_name, success: a.success, severity: a.severity, summary: a.summary }); });
+            var tbody = document.querySelector('#attack-plan-table tbody');
+            data.attacks.forEach(function(a, i) {
+                var tr = document.createElement('tr');
+                var bc = a.success ? 'badge-breached' : 'badge-defended';
+                var statusText = a.success ? 'BREACHED' : 'DEFENDED';
+                tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + escapeHtml(a.attack_name) + '</td><td><span class="badge badge-category">' + escapeHtml(a.attack_category) + '</span></td><td>' + escapeHtml(a.summary || '').slice(0, 100) + '</td><td><span class="badge ' + bc + '">' + statusText + '</span></td>';
+                tbody.appendChild(tr);
+                renderAttackConcluded({ attack_id: a.attack_id, attack_name: a.attack_name, success: a.success, severity: a.severity, summary: a.summary });
+            });
+            document.getElementById('plan-count').textContent = data.attacks.length + ' attacks';
             showPanel('attack-panel'); setActiveNav('attack');
         }
         if (data.report) {
@@ -613,6 +647,131 @@ function showToast(msg) {
     document.body.appendChild(t);
     setTimeout(function() { t.remove(); }, 4000);
 }
+/* ---- Metrics ---- */
+function loadMetrics() {
+    fetch('/api/metrics').then(function(r) { return r.json(); }).then(function(data) {
+        renderKPICards(data.kpi);
+        renderAgentScorecard(data.per_agent);
+        renderCategoryBreakdown(data.per_category);
+        renderSeverityDistribution(data.severity_distribution);
+        renderRecentBreaches(data.recent_breaches);
+    }).catch(function(e) { console.error('Failed to load metrics:', e); });
+}
+
+function renderKPICards(kpi) {
+    var container = document.getElementById('metrics-kpi');
+    if (!container) return;
+    var items = [
+        { label: 'AGENTS TESTED', value: kpi.agents_tested, cls: 'kpi-cyan' },
+        { label: 'TOTAL ATTACKS', value: kpi.total_attacks, cls: 'kpi-white' },
+        { label: 'BREACHED', value: kpi.breached, cls: 'kpi-red' },
+        { label: 'DEFENDED', value: kpi.defended, cls: 'kpi-green' },
+        { label: 'BREACH RATE', value: kpi.breach_rate + '%', cls: 'kpi-amber' }
+    ];
+    container.innerHTML = items.map(function(it) {
+        return '<div class="kpi-card ' + it.cls + '"><span class="kpi-value">' + it.value + '</span><span class="kpi-label">' + it.label + '</span></div>';
+    }).join('');
+}
+
+function renderAgentScorecard(perAgent) {
+    var container = document.getElementById('metrics-agent-scorecard');
+    if (!container) return;
+    var html = '';
+    var agents = Object.keys(perAgent).sort();
+    agents.forEach(function(agent) {
+        var d = perAgent[agent];
+        var total = d.breached + d.defended;
+        var pctDefended = total ? Math.round(d.defended / total * 100) : 100;
+        var pctBreached = 100 - pctDefended;
+        var scanId = d.scan_id || '';
+        html += '<div class="scorecard-row scorecard-clickable" data-scan-id="' + escapeHtml(scanId) + '">'
+            + '<span class="scorecard-agent">' + escapeHtml(agent) + '</span>'
+            + '<div class="scorecard-bar-container">'
+            + '<div class="scorecard-bar-fill scorecard-defended" style="width:' + pctDefended + '%"></div>'
+            + '<div class="scorecard-bar-fill scorecard-breached" style="width:' + pctBreached + '%"></div>'
+            + '</div>'
+            + '<span class="scorecard-stat">' + d.defended + '/' + total + ' defended</span>'
+            + '<span class="scorecard-arrow">&#x25B6;</span>'
+            + '</div>';
+    });
+    container.innerHTML = html;
+    container.querySelectorAll('.scorecard-clickable').forEach(function(row) {
+        row.addEventListener('click', function() {
+            var scanId = row.getAttribute('data-scan-id');
+            if (scanId) loadHistoricalScan(scanId);
+        });
+    });
+}
+
+function renderCategoryBreakdown(perCategory) {
+    var container = document.getElementById('metrics-categories');
+    if (!container) return;
+    var icons = {
+        system_prompt_exfil: '&#x1F50D;', pii_exfil: '&#x1F464;',
+        secret_exfil: '&#x1F511;', tool_misuse: '&#x1F527;',
+        policy_bypass: '&#x1F6AB;', cross_tenant: '&#x1F310;',
+        other: '&#x2753;'
+    };
+    var cats = Object.keys(perCategory).sort();
+    container.innerHTML = cats.map(function(cat) {
+        var d = perCategory[cat];
+        var total = d.breached + d.defended;
+        var icon = icons[cat] || icons.other;
+        return '<div class="category-card">'
+            + '<div class="category-icon">' + icon + '</div>'
+            + '<h4>' + escapeHtml(cat.toUpperCase()) + '</h4>'
+            + '<p class="category-stats">'
+            + '<span class="text-red">' + d.breached + ' breached</span> / '
+            + '<span class="text-green">' + d.defended + ' defended</span>'
+            + ' (' + total + ' total)</p>'
+            + '</div>';
+    }).join('');
+}
+
+function renderSeverityDistribution(dist) {
+    var container = document.getElementById('metrics-severity');
+    if (!container) return;
+    var levels = ['critical', 'high', 'medium', 'low'];
+    var colors = { critical: 'var(--red)', high: '#ff6600', medium: 'var(--amber)', low: '#666' };
+    var maxVal = Math.max.apply(null, levels.map(function(l) { return dist[l] || 0; })) || 1;
+    container.innerHTML = levels.map(function(l) {
+        var count = dist[l] || 0;
+        var pct = Math.round(count / maxVal * 100);
+        return '<div class="severity-row">'
+            + '<span class="severity-label">' + l.toUpperCase() + '</span>'
+            + '<div class="severity-bar-track">'
+            + '<div class="severity-bar-fill" style="width:' + pct + '%;background:' + colors[l] + '"></div>'
+            + '</div>'
+            + '<span class="severity-count">' + count + '</span>'
+            + '</div>';
+    }).join('');
+}
+
+function renderRecentBreaches(breaches) {
+    var tbody = document.querySelector('#metrics-breaches-table tbody');
+    if (!tbody) return;
+    if (!breaches || !breaches.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim)">No breaches recorded</td></tr>';
+        return;
+    }
+    tbody.innerHTML = breaches.map(function(b) {
+        return '<tr>'
+            + '<td><a class="breach-agent-link" href="#" data-scan-id="' + escapeHtml(b.scan_id || '') + '">' + escapeHtml(b.agent) + '</a></td>'
+            + '<td>' + escapeHtml(b.attack_name) + '</td>'
+            + '<td><span class="badge badge-category">' + escapeHtml(b.category) + '</span></td>'
+            + '<td><span class="badge badge-' + b.severity + '">' + escapeHtml(b.severity.toUpperCase()) + '</span></td>'
+            + '<td class="breach-summary">' + escapeHtml(b.summary).slice(0, 120) + '</td>'
+            + '</tr>';
+    }).join('');
+    tbody.querySelectorAll('.breach-agent-link').forEach(function(link) {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            var scanId = link.getAttribute('data-scan-id');
+            if (scanId) loadHistoricalScan(scanId);
+        });
+    });
+}
+
 function resetUI() {
     attacks = {}; attackIndex = 0; totalComplete = 0; totalBreached = 0; totalDefended = 0;
     currentPipelineStage = null; archComponents = []; archRelationships = {}; archNodes = {};

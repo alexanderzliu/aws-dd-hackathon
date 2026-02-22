@@ -85,8 +85,18 @@ _SCAN_MODES = {
     "deep": {"max_attacks": 10, "max_turns": 8},
 }
 
+# Available testee agents (Python module paths)
+TESTEES = [
+    ("crimson.testees.acme_customer_service", "Acme Customer Service"),
+    ("crimson.testees.banking_assistant", "Banking Assistant"),
+    ("crimson.testees.devops_assistant", "DevOps Assistant"),
+    ("crimson.testees.healthcare_agent", "Healthcare Agent"),
+    ("crimson.testees.hr_assistant", "HR Assistant"),
+    ("crimson.testees.travel_agent", "Travel Agent"),
+]
 
-def _run(scan_id: str, mode: str = "quick") -> None:
+
+def _run(scan_id: str, testee_module: str, mode: str = "quick") -> None:
     """Run the pipeline in a background thread."""
     global _is_running
     from crimson.events import EventBus
@@ -99,7 +109,7 @@ def _run(scan_id: str, mode: str = "quick") -> None:
     bus = EventBus.get(scan_id)
     try:
         from crimson.main import run_pipeline
-        run_pipeline("crimson.testees.acme_customer_service", scan_id=scan_id)
+        run_pipeline(testee_module, scan_id=scan_id)
     except Exception as e:
         logger.exception("Pipeline error")
         if bus:
@@ -146,20 +156,41 @@ async def graph():
 # Routes — Scan Management
 # ---------------------------------------------------------------------------
 
+@app.get("/api/testees")
+def list_testees():
+    """Return available testee agents for scan target selection."""
+    return {"testees": [{"module": m, "label": l} for m, l in TESTEES]}
+
+
 @app.post("/api/scan/start")
 async def start_scan(request: Request):
-    """Start a new scan. Returns 409 if one is already running."""
+    """Start a new scan. Returns 409 if one is already running.
+    Request body (optional JSON): {"testee": "crimson.testees.banking_assistant", "mode": "quick"}
+    """
     global _is_running
     with _scan_lock:
         if _is_running:
             return JSONResponse(status_code=409, content={"error": "Scan already running"})
         _is_running = True
 
-    # Parse scan mode from request body
+    # Parse request body (testee + scan mode)
     mode = "quick"
+    testee_module = "crimson.testees.acme_customer_service"
     try:
         body = await request.json()
-        mode = body.get("mode", "quick")
+        if body and isinstance(body, dict):
+            mode = body.get("mode", "quick")
+            if body.get("testee"):
+                module = body["testee"]
+                valid = {m for m, _ in TESTEES}
+                if module in valid:
+                    testee_module = module
+                else:
+                    _is_running = False
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": f"Unknown testee. Valid: {list(valid)}"},
+                    )
     except Exception:
         pass
     if mode not in _SCAN_MODES:
@@ -171,7 +202,7 @@ async def start_scan(request: Request):
     scan_id = new_scan_id()
     EventBus.create(scan_id)
 
-    thread = threading.Thread(target=_run, args=(scan_id, mode), daemon=True)
+    thread = threading.Thread(target=_run, args=(scan_id, testee_module, mode), daemon=True)
     thread.start()
 
     return {"scan_id": scan_id, "mode": mode}
@@ -259,6 +290,104 @@ async def event_stream(scan_id: str, request: Request):
 # ---------------------------------------------------------------------------
 # Routes — Existing API (preserved)
 # ---------------------------------------------------------------------------
+
+@app.get("/api/metrics")
+def get_metrics():
+    """Aggregate metrics across all completed scans."""
+    # Build label map from TESTEES
+    label_map = {m: l for m, l in TESTEES}
+
+    per_agent: dict[str, dict] = {}
+    per_category: dict[str, dict] = {}
+    severity_dist: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    recent_breaches: list[dict] = []
+    total_attacks = 0
+    total_breached = 0
+    total_defended = 0
+
+    if _ARTIFACT_DIR.exists():
+        for scan_dir in sorted(_ARTIFACT_DIR.iterdir()):
+            if not scan_dir.is_dir():
+                continue
+            scan_json = scan_dir / "scan.json"
+            attacks_jsonl = scan_dir / "attacks.jsonl"
+            if not scan_json.exists() or not attacks_jsonl.exists():
+                continue
+
+            try:
+                scan_data = json.loads(scan_json.read_text())
+            except Exception:
+                continue
+            testee_id = scan_data.get("testee_id", "")
+            agent_label = label_map.get(testee_id, testee_id.split(".")[-1])
+
+            if agent_label not in per_agent:
+                per_agent[agent_label] = {"breached": 0, "defended": 0, "scan_id": scan_dir.name}
+            else:
+                # Keep the latest scan_id
+                per_agent[agent_label]["scan_id"] = scan_dir.name
+
+            try:
+                attacks = [
+                    json.loads(line)
+                    for line in attacks_jsonl.read_text().splitlines()
+                    if line.strip()
+                ]
+            except Exception:
+                continue
+
+            for a in attacks:
+                total_attacks += 1
+                success = a.get("success", False)
+                sev = a.get("severity", "medium")
+                cat = a.get("attack_category", "other")
+
+                if success:
+                    total_breached += 1
+                    per_agent[agent_label]["breached"] += 1
+                    recent_breaches.append({
+                        "agent": agent_label,
+                        "attack_name": a.get("attack_name", ""),
+                        "category": cat,
+                        "severity": sev,
+                        "summary": a.get("summary", ""),
+                        "ended_at": a.get("ended_at", ""),
+                        "scan_id": scan_dir.name,
+                    })
+                else:
+                    total_defended += 1
+                    per_agent[agent_label]["defended"] += 1
+
+                if sev in severity_dist:
+                    severity_dist[sev] += 1
+
+                if cat not in per_category:
+                    per_category[cat] = {"breached": 0, "defended": 0}
+                if success:
+                    per_category[cat]["breached"] += 1
+                else:
+                    per_category[cat]["defended"] += 1
+
+    agents_tested = len(per_agent)
+    breach_rate = round(total_breached / total_attacks * 100, 1) if total_attacks else 0
+
+    # Sort recent breaches by time descending
+    recent_breaches.sort(key=lambda x: x.get("ended_at", ""), reverse=True)
+
+    return {
+        "kpi": {
+            "agents_tested": agents_tested,
+            "total_attacks": total_attacks,
+            "breached": total_breached,
+            "defended": total_defended,
+            "breach_rate": breach_rate,
+        },
+        "per_agent": per_agent,
+        "per_category": per_category,
+        "severity_distribution": severity_dist,
+        "recent_breaches": recent_breaches[:10],
+    }
+
 
 @app.get("/api/scan/{scan_id}")
 def get_scan(scan_id: str):
